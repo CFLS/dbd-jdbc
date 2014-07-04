@@ -37,7 +37,7 @@ module DBI::DBD::Jdbc
       #attributes specific to this class.  All attributes in the
       #connect attributes that aren't in this list will be
       #applied to the database handle
-      @driverAttributes = [ "driver" ]
+      @driverAttributes = [ "driver", "driver_class" ]
       @loaded_drivers = Collections.synchronizedMap(HashMap.new)
     end
 
@@ -45,21 +45,29 @@ module DBI::DBD::Jdbc
       unless @loaded_drivers.containsKey(name)
         clazz = java.lang.Class.forName(name,true,JRuby.runtime.jruby_class_loader)
         java.sql.DriverManager.registerDriver(clazz.newInstance)
-        
+
         @loaded_drivers.put(name,true)
       end
     end
 
-    def connect(dbname, user, auth, attr)
-      driverClass = attr["driver"]
-      raise DBI::InterfaceError.new('driver class name must be specified as "driver" in connection attributes') unless driverClass
+    def connect(dbname, user, auth, options={})
+      driver_class_name = options["driver"]
+      driver_class = options["driver_class"]
+      raise DBI::InterfaceError.new('driver class name must be specified as "driver" or driver class as "driver_class" in connection attributes') if driver_class.nil? and driver_class_name.nil?
 
-      load(driverClass)
-
-      connection = java.sql.DriverManager.getConnection("jdbc:"+dbname, user, auth)
+      if driver_class_name
+        load(driver_class_name)
+        connection = java.sql.DriverManager.getConnection("jdbc:"+dbname, user, auth)
+      else
+        driver = driver_class.new
+        props = java.util.Properties.new
+        props.setProperty("user", user)
+        props.setProperty("password", auth)
+        connection = driver.connect("jdbc:#{dbname}", props)
+      end
       dbh = Database.new(connection)
 
-      (attr.keys - @driverAttributes).each { |key| dbh[key] = attr[key] }
+      (options.keys - @driverAttributes).each { |key| dbh[key] = options[key] }
 
       return dbh
     rescue NativeException => error
